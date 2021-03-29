@@ -1,9 +1,12 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, json, Response
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from wtforms import validators
 
+# agregados
 from products import products
+from flask_marshmallow import Marshmallow
+from marshmallow_sqlalchemy import ModelSchema
 
 from sqlalchemy.orm import relationship, lazyload
 from sqlalchemy import Boolean, Column, ForeignKey
@@ -15,6 +18,7 @@ from aplicacion import config
 app = Flask(__name__)
 app.config.from_object(config)
 db = SQLAlchemy(app)
+ma = Marshmallow(app)
 
 
 #--------------------------------------Modelo base de datos-----------------------------------#
@@ -30,7 +34,7 @@ class usuarios (db.Model):
 	phone = db.Column(db.String(20), nullable = False)
 	email = db.Column(db.String(80), nullable = False)
 	password = db.Column(db.String(50), nullable = False)
-	reserv_user = db.relationship('reserv', backref='owner', cascade="all, delete-orphan")
+	#reserv_user = db.relationship('reserv', backref='owner', cascade="all, delete-orphan")
 
 	def __init__(self, username,lastname,dni,address,movilphone,phone,email,password):
 		self.username = username
@@ -44,6 +48,11 @@ class usuarios (db.Model):
 
 	def __repr__(self):
 		return '<Usuarios %r>' % (self.username)
+
+class usuariosSchema(ModelSchema):
+	class Meta:
+		model = usuarios
+		sql_session = db.session
 
 class admin (db.Model):
 	__tablename__ = "Admin"
@@ -62,19 +71,27 @@ class servicios (db.Model):
 	policlinica = db.Column(db.String(50), nullable = False)
 	fecha = db.Column(db.String(50), nullable = False)
 	horario = db.Column(db.String(50), nullable = False)
-	reserv_serv = db.relationship('reserv', backref='services', cascade="all, delete-orphan", lazy='select')
+	#reserv_serv = db.relationship('reserv', backref='services', cascade="all, delete-orphan", lazy='select')
 
-	def __init__(self, id, nombre, especialidad, policlinica, fecha, horario):
-		self.id = id
+	def __init__(self,  nombre, especialidad, policlinica, fecha, horario):
 		self.nombre = nombre
 		self.especialidad = especialidad
 		self.policlinica = policlinica
 		self.fecha = fecha
 		self.horario = horario
 
+	#def __repr__(self):
+	#	return f'Servicios({self.nombre}, {self.especialidad},{self.policlinica}, {self.fecha}, {self.horario})'
+
 	def __repr__(self):
 		return '<Servicios %r>' % (self.id)
 
+class serviciosSchema(ModelSchema):
+	class Meta:
+		model = servicios
+		sql_session = db.session
+
+		
 class reserv (db.Model):
 	__tablename__ = "reservas"
 	id = db.Column(db.Integer, primary_key=True)
@@ -82,7 +99,16 @@ class reserv (db.Model):
 	numturnos = db.Column(db.Integer, nullable = False)
 	user_id = db.Column(db.Integer, db.ForeignKey('Usuarios.id'))
 
+	
+	def __init__(self,  atencion, numturnos, user_id):
+		self.atencion = atencion
+		self.numturnos = numturnos
+		self.user_id = user_id
 
+class reservSchema(ModelSchema):
+	class Meta:
+		model = reserv
+		sql_session = db.session
 #-----------------------------sesiones administrador-------------------------------------------#
 
 
@@ -352,11 +378,13 @@ def atenciones():
 
 @app.route("/appservicios", methods=["GET","POST"]) 
 def appservicios():
-	info_servicios = servicios.query.all()
 	
-	print ('DATA:', repr(info_servicios))
-	return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00"})
-	#return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00", "servicios":jsonify.args(info_servicios)})
+	todos_servicios = servicios.query.all()
+	servicios_schema = serviciosSchema(many=True)
+	output = servicios_schema.dump(todos_servicios)
+	return jsonify({"servicios":output})
+	#return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00"})
+	#return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00", "servicios":jsonservicios})
 
 
 @app.route("/editar", methods=["GET","POST"])
