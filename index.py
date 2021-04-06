@@ -9,7 +9,7 @@ from flask_marshmallow import Marshmallow
 from marshmallow_sqlalchemy import ModelSchema
 
 from sqlalchemy.orm import relationship, lazyload
-from sqlalchemy import Boolean, Column, ForeignKey
+from sqlalchemy import Boolean, Column, ForeignKey, func
 from sqlalchemy import DateTime, Integer, String, Text, Float
 
 import os
@@ -34,9 +34,10 @@ class usuarios (db.Model):
 	phone = db.Column(db.String(20), nullable = False)
 	email = db.Column(db.String(80), nullable = False)
 	password = db.Column(db.String(50), nullable = False)
-	#reserv_user = db.relationship('reserv', backref='owner', cascade="all, delete-orphan")
+	reserv_user = db.relationship('reserv', backref='owner', cascade="all, delete-orphan")
+	#reserv_user = db.relationship('reserv', back_populates='usuarios')
 
-	def __init__(self, username,lastname,dni,address,movilphone,phone,email,password):
+	def __init__(self, username,lastname,dni,address,movilphone,phone,email,password,reserv_user):
 		self.username = username
 		self.lastname = lastname
 		self.dni = dni
@@ -45,6 +46,7 @@ class usuarios (db.Model):
 		self.phone = phone
 		self.email = email
 		self.password = password
+		self.reserv_user
 
 	def __repr__(self):
 		return '<Usuarios %r>' % (self.username)
@@ -71,20 +73,22 @@ class servicios (db.Model):
 	policlinica = db.Column(db.String(50), nullable = False)
 	fecha = db.Column(db.String(50), nullable = False)
 	horario = db.Column(db.String(50), nullable = False)
-	#reserv_serv = db.relationship('reserv', backref='services', cascade="all, delete-orphan", lazy='select')
+	reserv_serv = db.relationship('reserv',  backref='services', cascade="all, delete-orphan", lazy='select')
+	#reserv_serv = db.relationship('reserv', back_populates='servicios',  lazy='select')
 
-	def __init__(self,  nombre, especialidad, policlinica, fecha, horario):
+	def __init__(self,  nombre, especialidad, policlinica, fecha, horario, reserv_serv):
 		self.nombre = nombre
 		self.especialidad = especialidad
 		self.policlinica = policlinica
 		self.fecha = fecha
 		self.horario = horario
-
-	#def __repr__(self):
-	#	return f'Servicios({self.nombre}, {self.especialidad},{self.policlinica}, {self.fecha}, {self.horario})'
+		self.reserv_serv
 
 	def __repr__(self):
-		return '<Servicios %r>' % (self.id)
+		return f'Servicios({self.nombre}, {self.especialidad},{self.policlinica}, {self.fecha}, {self.horario})'
+
+	#def __repr__(self):
+	#	return '<Servicios %r>' % (self.id)
 
 class serviciosSchema(ModelSchema):
 	class Meta:
@@ -97,8 +101,9 @@ class reserv (db.Model):
 	id = db.Column(db.Integer, primary_key=True)
 	atencion = db.Column(db.Integer, db.ForeignKey('Servicios.id'))
 	numturnos = db.Column(db.Integer, nullable = False)
-	user_id = db.Column(db.Integer, db.ForeignKey('Usuarios.id'))
-
+	#user_id = db.Column(db.Integer, db.ForeignKey('Usuarios.id'))
+	user_id = relationship('usuarios', backref='reserv')
+	#usuarios = relationship('usuarios',back_populates='reserv')
 	
 	def __init__(self,  atencion, numturnos, user_id):
 		self.atencion = atencion
@@ -198,12 +203,12 @@ def registro():
 @app.route("/addregistro", methods=["POST"])
 def addregistro():
 	print("$$ LLAMADA A addregistro")
-	upass1 = request.json['contraseña'],
-	upass2 = request.json['confcontraseña'],
+	upass1 = request.json['pass'],
+	upass2 = request.json['confpass'],
 	udni = request.json['cedula']
 	existe_usuario = usuarios.query.filter_by(dni=udni).first()
 	if existe_usuario == None and upass1 == upass2:
-		passw = generate_password_hash(request.json['contraseña'], method="sha256")
+		passw = generate_password_hash(request.json['pass'], method="sha256")
 		new_user = usuarios(username=request.json['name'] ,
 							lastname=request.json['lastname'],
 							dni=request.json['cedula'],
@@ -268,7 +273,7 @@ def appiniciarsesion():
 		print("$$ json que viene")
 		print(request.json)
 
-		if user and check_password_hash(user.password, request.json["contraseña_init"]):
+		if user and check_password_hash(user.password, request.json["pass_init"]):
 			login_user(user)
 			return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00"})
 
@@ -339,7 +344,7 @@ def appeliminarusuario():
 		print(request.json)
 		sesionuser = session["id"]
 		deleteuser = usuarios.query.filter_by(id = sesionuser).first()
-		if check_password_hash(deleteuser.password, request.json["contraseña"]):
+		if check_password_hash(deleteuser.password, request.json["pass"]):
 			db.session.delete(deleteuser)
 			db.session.commit()
 			logout_user()
@@ -383,8 +388,6 @@ def appservicios():
 	servicios_schema = serviciosSchema(many=True)
 	output = servicios_schema.dump(todos_servicios)
 	return jsonify({"servicios":output})
-	#return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00"})
-	#return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00", "servicios":jsonservicios})
 
 
 @app.route("/editar", methods=["GET","POST"])
@@ -421,6 +424,36 @@ def editar():
 							datadni = datadni, dataaddress = dataaddress, datamovil = datamovil,
 							dataphone = dataphone, dataemail = dataemail)
 
+#--------- editar datos del usuario desde la app
+
+@app.route("/appeditarusuario", methods=["GET","POST"])
+def appeditarusuario():
+	datausuario = session["id"]
+	datauser = usuarios.query.filter_by(id = datausuario).first()
+
+	dataname = datauser.username
+	datalastname = datauser.lastname
+	datadni = datauser.dni
+	dataaddress = datauser.address
+	datamovil = datauser.movilphone
+	dataphone = datauser.phone
+	dataemail = datauser.email
+
+	if request.method == "POST":
+		datauser.username = request.json["modname"]
+		datauser.lastname = request.json["modlastname"]
+		datauser.dni = request.json["moddni"]
+		datauser.address = request.json["modadd"]
+		datauser.movilphone = request.json["modmovil"]
+		datauser.phone = request.json["modphone"]
+		datauser.email = request.json["modemail"]
+
+		db.session.add(datauser)
+		db.session.commit()
+		return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00"})
+	return jsonify({"detalle":"No se ha podido modificar. Verifique!", "cod_retorno":"01"})
+
+
 #--------------------------------------SERVICIOS DISPONIBLES PARA EL USUARIO-----------------------------------------#
 
 @app.route("/servicios", methods=["GET"])
@@ -454,8 +487,23 @@ def cancelar():
 def cancelok():
 	return render_template("cancelok")
 
-#----------------------------------------------------------------#
+#------------CANCELAR RESERVA DESDE LA APP -------------------------------#	
+@app.route("/appcancelarreserva")
+def appcancelarreserva():
+	my_sesion = session["id"]
+	own_reserv = reserv.query.filter_by(user_id = my_sesion).all()
+	own_serv = reserv.query.filter_by(user_id = my_sesion).all()
 
+	if request.method == "POST":
+		del_reserv = reserv.query.filter_by(id = request.form["radiob"]).first()
+		db.session.delete(del_reserv)
+		db.session.commit()
+
+		return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00"})
+	return jsonify({"detalle":"No se ha podido cancelar. Verifique!", "cod_retorno":"01"})
+
+
+#-------------------------------------------------------------------------#
 
 
 @app.route("/reservas", methods=["GET","POST"])
@@ -499,6 +547,70 @@ def reservas():
 				return render_template("reservas.html", goturn = goturn, userturno = userturno, servdisp = servdisp, uuser = owner_reserv)
 			return render_template("reservas.html", servdisp = servdisp, uuser = owner_reserv, msg_cupos = msg_cupos)
 	return render_template("reservas.html", servdisp = servdisp, uuser = owner_reserv)
+
+#----------RESERVAR DESDE LA APP --------------------------------------------------------#
+
+@app.route("/appreservas", methods=["POST"])
+def appreservas():
+	print("$$ LLAMADA A appiniciarsesion ")
+	print("$$ json que viene")
+	print(request.json)
+
+	id = request.json["id"]
+	owner_user = usuarios.query.filter_by(id = id).first()
+	owner_reserv = reserv.query.filter_by(user_id = id).all()
+	servdisp = servicios.query.all()
+	reservas_schema = reservSchema(many=True)
+	output = reservas_schema.dump(servdisp)
+	
+
+	#reserv_exist = servicios.query.filter_by(id = request.json["okturno"]).first()
+	#number_using = reserv.query.filter_by(atencion = reserv_exist)
+	# me pruebo
+	#number_using = reserv.query.filter_by(atencion = reserv_exist)
+	print("$$ 1")
+	number_using = reserv.query.filter_by(atencion = request.json["okturno"]).count()
+	print("$$ 2")
+	#return jsonify({"reservas":output})
+	if number_using == None:
+		print("$$ EnTTTTreeeeEEEEEE ")
+		servis_serv = servicios.query.filter_by(id = request.json["okturno"]).first()
+		sendreserv = reserv(atencion = request.json["okturno"], numturnos = 1, owner = owner_user)
+		db.session.add(sendreserv)
+		db.session.commit()
+		return jsonify({"detalle":"Proceso Ok!", "cod_retorno":"00"})
+		#return render_template("reservas.html", goturn = goturn, userturno = userturno, servdisp = servdisp, uuser = owner_reserv)
+	else:
+		print("$$ entre en el else ")
+		sendreserv = reserv(atencion = request.json["okturno"], numturnos = number_using + 1, owner = owner_user)
+		db.session.add(sendreserv)
+		db.session.commit()
+
+		return jsonify({"detalle":"Proceso Ok", "cod_retorno":"00"})
+		""" print("$$entre en el else ")
+		turn = 0
+		if turn == 0:
+			print("$$entre en el if ")
+			for i in number_using:
+				turn = i.numturnos
+		else:
+			print("$$entre en el segundo else ")
+			turn = 0
+			for i in number_using:
+				turn = i.numturnos
+
+			if	turn < 30:
+				servis_serv = servicios.query.filter_by(id = request.json["okturno"]).first()
+				sendreserv = reserv(atencion = request.json["okturno"], numturnos = turn + 1, owner = owner_user)
+				db.session.add(sendreserv)
+				db.session.commit()
+				return jsonify({"detalle":"nO", "cod_retorno":"01"})
+			 	#return render_template("reservas.html", goturn = goturn, userturno = userturno, servdisp = servdisp, uuser = owner_reserv)
+
+			return jsonify({"detalle":"Lamentamos informar que no quedan turnos disponibles", "cod_retorno":"02", "servicios_disponibles":output}) """
+			#return render_template("reservas.html", servdisp = servdisp, uuser = owner_reserv, msg_cupos = msg_cupos)
+	return jsonify({"detalle":"Imposible obtener numero", "cod_retorno":"03", "servicios_disponibles":output})
+	#return render_template("reservas.html", servdisp = servdisp, uuser = owner_reserv)
 	
 #----------------------------------------------------------------------------------------#
 @app.route("/infoatenciones", methods=["GET","POST"])
